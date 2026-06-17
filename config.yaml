@@ -1,0 +1,34 @@
+# Пути к файлам данных
+data:
+  train: "data/subsamples/up0.001_ip0.001/train/week_24.parquet"
+  val: "data/subsamples/up0.001_ip0.001/validation/week_25.parquet"
+  items_meta: "data/metadata/items_metadata.parquet"
+  pipeline: "pipeline.pkl"
+
+# Пороги для тестов
+thresholds:
+  segmented_auc: 0.65
+  min_group_size: 30
+  psi: 0.25
+  min_effect_size: 0.02
+  p_value: 0.05
+
+# Признаки модели и контекстные признаки
+features:
+  model: ["timespent", "duration", "category", "author_id"]
+  context: ["platform", "place", "agent"]
+
+# Значения признаков для Pairwise теста
+pairwise_values:
+  timespent: [0, 1, 10, 50, 100, 150, 200, 255]
+  duration: [5, 10, 15, 30, 60, 90, 120, 150, 180]
+  category: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+  author_id: [100, 500, 1000]
+
+# Бизнес-гипотезы для Decision Table
+# Формат: название, условие группы А, условие группы Б, ожидаемое направление (greater/less/two-sided)
+hypotheses:
+  - ["Досмотр > Недосмотр", "timespent == 0", "timespent == duration", "greater"]
+  - ["Перемотка хуже досмотра", "timespent == duration", "timespent > duration", "less"]
+  - ["Короткие > Длинные", "duration > 120", "duration < 30", "greater"]
+  - ["Популярный автор ≠ Обычный", "author_id в топ-50", "author_id не в топ-50", "two-sided"]

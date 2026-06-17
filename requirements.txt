@@ -1,0 +1,10 @@
+streamlit
+polars
+numpy
+pandas
+scikit-learn
+scipy
+allpairspy
+plotly
+huggingface_hub
+pyyaml

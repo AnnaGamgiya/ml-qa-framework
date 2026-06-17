@@ -1,0 +1,100 @@
+# ML QA Framework
+
+Учебный фреймворк для тестирования ML‑моделей методами классического QA.  
+Показывает, как применять эквивалентное разбиение, граничные значения, попарное тестирование (pairwise) и таблицы решений к модели машинного обучения.
+
+Фреймворк написан на Python, использует Streamlit для дашборда и открытый датасет VK‑LSVD.
+
+## Что внутри
+
+- **5 тестов**: Segmented AUC, Boundary Test, Decision Table, Pairwise Test, Stability Test.
+- **Дашборд** на Streamlit с пояснениями и графиками.
+- **Конфигурационный файл** (`config.yaml`) для быстрой адаптации под свои данные и гипотезы.
+- **Справочник терминов** прямо в дашборде.
+
+## Быстрый старт
+
+1. Клонируйте репозиторий:
+   ```bash
+   git clone https://github.com/AriadnaQA/ml-qa-framework.git
+   cd ml-qa-framework
+Создайте и активируйте виртуальное окружение:
+
+bash
+python -m venv venv
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
+Установите зависимости:
+
+bash
+pip install -r requirements.txt
+Скачайте демо‑датасет (маленький срез VK‑LSVD, скачивается автоматически):
+
+bash
+python download_data.py
+Обучите пайплайн (препроцессинг + модель):
+
+bash
+python train_pipeline.py
+
+Запустите дашборд:
+
+bash
+streamlit run app.py
+Откройте браузер и перейдите по адресу http://localhost:8501.
+
+Как адаптировать под свои данные
+Все настройки находятся в файле config.yaml.
+
+Вы можете:
+
+Изменить пути к своим parquet‑файлам (train/val/items_meta).
+
+Поменять пороги: AUC, PSI, минимальный размер группы, минимальный значимый эффект, p‑value.
+
+Задать свои бизнес‑гипотезы в разделе hypotheses.
+Формат: [название, условие_группы_А, условие_группы_Б, направление].
+Направление: greater, less или two‑sided.
+
+Настроить список признаков модели и контекстных признаков.
+
+Определить значения параметров для pairwise‑теста.
+
+После изменения конфига переобучите пайплайн на своих данных и перезапустите дашборд.
+
+## Структура проекта
+
+- **config.yaml** — Конфигурация: пути, пороги, гипотезы, признаки
+- **download_data.py** — Скачивание демо‑датасета VK‑LSVD
+- **train_pipeline.py** — Обучение пайплайна препроцессинга и модели
+- **preprocessing.py** — Класс для кодирования авторов
+- **ml_tests.py** — Классы тестов (Segmented AUC, Boundary и др.)
+- **app.py** — Дашборд на Streamlit
+- **requirements.txt** — Список зависимостей
+- **README.md** — Этот файл
+
+Зависимости
+Python 3.10+
+
+Streamlit
+
+Polars
+
+Pandas
+
+Scikit‑learn
+
+SciPy
+
+AllPairsPy
+
+Plotly
+
+HuggingFace Hub
+
+PyYAML
+
+Лицензия
+MIT
