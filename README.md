@@ -72,5 +72,5 @@
 
     Python 3.10+, Streamlit, Polars, Pandas, Scikit-learn, SciPy, AllPairsPy, Plotly, HuggingFace Hub, PyYAML
     ```
-6.  Нажмите зелёную кнопку **Commit changes...**.
+
 
