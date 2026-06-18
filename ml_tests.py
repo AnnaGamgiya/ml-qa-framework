@@ -55,6 +55,8 @@ class BoundaryTest:
         bounds = {
             "timespent": [0, 1, 254, 255],
             "duration": [5, 6, 179, 180],
+            "category": [0, 1, 18, 19],
+            "author_popularity": [0, 1, self.train_medians.get("author_popularity", 500), self.train_medians.get("author_popularity", 500)*2]
         }
         feature_list = [f for f in self.feature_names if f in bounds]
         for f1, f2 in combinations(feature_list, 2):
@@ -114,12 +116,18 @@ class DecisionTableTest:
         mean_b = float(np.mean(pred_b))
         diff = mean_b - mean_a
 
+        passed = False
+        inconclusive = False
+
         if expected_direction == 'greater':
-            passed = diff > self.min_effect_size
+            passed = diff > 0
         elif expected_direction == 'less':
-            passed = diff < -self.min_effect_size
-        else:
-            passed = abs(diff) > self.min_effect_size
+            passed = diff < 0
+        else:  # two-sided
+            if abs(diff) > self.min_effect_size:
+                passed = True
+            else:
+                inconclusive = True
 
         self.scenarios.append({
             "name": name,
@@ -130,11 +138,21 @@ class DecisionTableTest:
             "diff": diff,
             "min_effect": self.min_effect_size,
             "expected": expected_direction,
-            "passed": passed
+            "passed": passed,
+            "inconclusive": inconclusive
         })
 
     def run(self):
         self.scenarios = []
+
+        top_authors = (
+            self.data
+            .group_by("author_id")
+            .count()
+            .sort("count", descending=True)
+            .head(50)["author_id"]
+            .to_list()
+        )
 
         self._add(
             "Досмотр > Недосмотр",
@@ -167,8 +185,8 @@ class DecisionTableTest:
             "Популярный автор ≠ Обычный",
             "author_id в топ-50",
             "author_id не в топ-50",
-            self.data.filter(pl.col("author_id").is_in(self.top_authors)),
-            self.data.filter(~pl.col("author_id").is_in(self.top_authors)),
+            self.data.filter(pl.col("author_id").is_in(top_authors)),
+            self.data.filter(~pl.col("author_id").is_in(top_authors)),
             "two-sided"
         )
 

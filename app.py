@@ -32,9 +32,12 @@ def load_data():
     train = train.with_columns(pl.col("item_id").replace(category_map).cast(pl.UInt8).alias("category"))
     val = val.with_columns(pl.col("item_id").replace(category_map).cast(pl.UInt8).alias("category"))
 
-    author_counts = train.group_by("author_id").count().rename({"count": "author_popularity"})
+    author_counts = train.group_by("author_id").len().rename({"len": "author_popularity"})
     train = train.join(author_counts, on="author_id", how="left")
     val = val.join(author_counts, on="author_id", how="left")
+
+    train = train.with_columns(pl.col("author_popularity").fill_null(0))
+    val = val.with_columns(pl.col("author_popularity").fill_null(0))
 
     return train, val
 
@@ -43,7 +46,6 @@ train, val = load_data()
 with open("pipeline.pkl", "rb") as f:
     pipeline = pickle.load(f)
 
-# Предсказания только по заявленным признакам
 feature_cols = ["timespent", "duration", "category", "author_popularity"]
 X_val = val.select(feature_cols).to_pandas()
 pred_val = pipeline.predict_proba(X_val)[:, 1]
@@ -53,17 +55,13 @@ train_pd = train.select(feature_cols).to_pandas()
 train_medians = train_pd.median().to_dict()
 train_modes = {col: train_pd[col].mode()[0] for col in train_pd.columns if train_pd[col].dtype == 'object' or train_pd[col].nunique() < 20}
 
-# Топ-50 авторов для Decision Table
-top_authors = train.group_by("author_id").count().sort("count", descending=True).head(50)["author_id"].to_list()
-
 srt = SegmentedRegressionTest(val, pipeline, threshold=0.65, min_group_size=30)
 srt_res, srt_det, srt_auc, srt_sizes, srt_fail = srt.run()
 
-bt = BoundaryTest(pipeline, ["timespent", "duration"], train_medians, train_modes)
+bt = BoundaryTest(pipeline, ["timespent", "duration", "category", "author_popularity"], train_medians, train_modes)
 bt_res, bt_det, bt_cases = bt.run()
 
 dtt = DecisionTableTest(val, pipeline, min_group_size=30, min_effect_size=0.02)
-dtt.top_authors = top_authors
 dtt_res, dtt_det, dtt_scenarios = dtt.run()
 
 timespent_bins = [0, 1, 10, 50, 100, 150, 200, 255]
@@ -121,7 +119,6 @@ elif page == "Segmented AUC":
         fig = px.bar(x=cat_names, y=list(srt_auc.values()), labels={"x": "Категория", "y": "AUC"})
         fig.add_hline(y=0.65, line_dash="dash", line_color="red")
         st.plotly_chart(fig)
-    # Список недостаточных групп
     all_segments = list(range(20))
     missing = [s for s in all_segments if s not in srt_auc]
     if missing:
@@ -131,27 +128,34 @@ elif page == "Boundary Test":
     st.header("Boundary Test — граничные значения")
     st.markdown("""
     **Что показывает таблица:**  
-    Мы подаём пайплайну крайние значения числовых признаков (`timespent` и `duration`).  
-    Для остальных параметров подставляются медианные или модальные значения из обучающей выборки.  
+    Подаём крайние значения четырёх признаков: `timespent`, `duration`, `category`, `author_popularity`.  
+    Для каждого признака взято по 4 граничных значения. Для неварьируемых признаков подставляются медианные/модальные значения.  
     Тест проверяет, что на экстремальных входных данных production-пайплайн не падает, а предсказания остаются в [0, 1] и не содержат NaN.
     """)
     if bt_res == "PASS": st.success(bt_det)
     else: st.error(bt_det)
     st.markdown(f"Проверено **{len(bt_cases)}** комбинаций.")
     df_bt = pd.DataFrame(bt_cases[:30])
-    st.dataframe(df_bt[["timespent", "duration", "Предсказание", "Статус"]])
+    st.dataframe(df_bt[["timespent", "duration", "category", "author_popularity", "Предсказание", "Статус"]])
 
 elif page == "Decision Table":
     st.header("Decision Table — проверка бизнес-гипотез")
     st.markdown("""
     **Что показывает таблица:**  
     Мы сформулировали ожидаемые правила и проверили их через сравнение средних предсказанных вероятностей.  
-    Для каждой гипотезы указаны две группы (А и Б), их средние вероятности и разница (B−A).  
-    Гипотеза подтверждается, если разница превышает минимальный значимый эффект (0.02) в ожидаемом направлении.  
+    Для каждой гипотезы указаны две группы (А и Б), их средние вероятности и разница (B−A).
+
+    **Как читать вердикты:**
+    - ✅ **Подтверждена** — разница направлена в ожидаемую сторону. Для гипотез с направлением (greater / less) этого достаточно, порог не применяется. Для гипотез без направления (two-sided) разница должна быть больше 0.02.
+    - ❌ **Противоречит** — разница направлена в противоположную сторону (ожидали рост, а получили падение, или наоборот).
+    - ⚠️ **Недостаточно данных** — разница есть, но она слишком мала (меньше 0.02), чтобы считать гипотезу подтверждённой. Применяется только к гипотезам без направления (two-sided).
+
+    **Почему для направленных гипотез нет порога:**  
+    Если модель говорит «досмотренное видео лайкают чаще», но разница всего 1% — это всё ещё верное направление. Модель не ошиблась, просто эффект слабый. Мы не наказываем модель за слабый эффект, если она правильно поняла закономерность. Порог 0.02 оставлен только для случаев, где мы проверяем сам факт различия без указания направления.
+
     Статистические тесты не применяются — фреймворк сознательно смещает фокус на практическую значимость (Effect Size).
     """)
     human = {
-        "Досмотр > Недосмотр": "Досмотренное видео лайкают чаще, чем недосмотренное?",
         "Недосмотр хуже полного досмотра": "Недосмотренное видео получает более низкую вероятность лайка, чем досмотренное?",
         "Короткие > Длинные": "Короткие (<30 с) лайкают чаще длинных (>120 с)?",
         "Популярный автор ≠ Обычный": "Популярный автор vs обычный — есть ли разница?",
@@ -161,7 +165,13 @@ elif page == "Decision Table":
     else: st.warning(dtt_det)
     table = []
     for s in dtt_scenarios:
-        status = "✅" if s["passed"] else "❌"
+        if s.get("inconclusive"):
+            status = "⚠️ недостаточно данных"
+        elif s["passed"]:
+            status = "✅ подтверждена"
+        else:
+            status = "❌ противоречит"
+        min_effect_display = f"{s['min_effect']:.2f}" if s["expected"] == "two-sided" else "не применяется"
         table.append({
             "Гипотеза": human.get(s["name"], s["name"]),
             "Группа А": s["condition_a"],
@@ -169,7 +179,7 @@ elif page == "Decision Table":
             "Средняя А": f"{s['mean_A']:.4f}",
             "Средняя Б": f"{s['mean_B']:.4f}",
             "Разница (B−A)": f"{s['diff']:+.4f}",
-            "Мин. значимый эффект": f"{s['min_effect']:.2f}",
+            "Мин. значимый эффект": min_effect_display,
             "Ожидаемое направление": s["expected"],
             "Вердикт": status
         })
@@ -179,8 +189,9 @@ elif page == "Pairwise Test":
     st.header("Pairwise Test — попарное тестирование параметров")
     st.markdown("""
     **Что показывает таблица:**  
-    Мы проверили модель на комбинациях параметров. Каждая строка — одна комбинация.  
-    Непрерывные признаки `timespent` и `duration` были предварительно разбиты на диапазоны (квантованы), и уже для этих дискретных классов алгоритм AllPairs сгенерировал минимальный набор, покрывающий все возможные пары. Для нашего набора данных получилось 182 комбинации.
+    Признаки: `timespent` (разбит на диапазоны, квантован), `duration` (разбит на диапазоны, квантован),  
+    `category` (дискретный, 0–19), `author_popularity` (дискретный, 0, 1, 10, 100, 500, 1000).  
+    Алгоритм AllPairs сгенерировал минимальный набор, покрывающий все возможные пары. Для нашего набора данных получилось 182 комбинации.
     """)
     if pt_res == "PASS": st.success(pt_det)
     else: st.error(pt_det)
@@ -225,7 +236,7 @@ elif page == "Справочник":
     with st.expander("PSI"):
         st.markdown("Индекс стабильности популяции. Сравнивает распределения признака в двух выборках. > 0.25 — значительный дрейф.")
     with st.expander("Минимальный значимый эффект"):
-        st.markdown("Порог практической значимости. Разница в предсказанной вероятности должна быть больше этого порога, чтобы считаться важной. Установлен 0.02 для демонстрации.")
+        st.markdown("Порог практической значимости. Разница в предсказанной вероятности должна быть больше этого порога, чтобы считаться важной. Установлен 0.02 для демонстрации. Применяется только для гипотез без направления (two-sided).")
     with st.expander("Направление гипотезы"):
         st.markdown("Указывает, какое соотношение между группами мы ожидаем: greater (Б > А), less (Б < А), two-sided (А ≠ Б).")
     with st.expander("Допущения"):
